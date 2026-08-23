@@ -1,0 +1,1232 @@
+<title>M4 GPU DVFS Map</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0c0e12;
+    --surface: #151820;
+    --surface-raised: #1c2029;
+    --border: #2a2e3a;
+    --text: #d8dce6;
+    --text-dim: #7a8194;
+    --text-muted: #4e5568;
+    --accent: #4fa8e0;
+    --accent-dim: rgba(79, 168, 224, 0.12);
+    --voltage-lo: #3b8abf;
+    --voltage-hi: #e0894f;
+    --corner-line: #2e5a7a;
+    --idle: #4e5568;
+    --base: #5b9e5b;
+    --peak: #d45d5d;
+    --power-fill: rgba(79, 168, 224, 0.08);
+    --sram-fill: rgba(224, 137, 79, 0.06);
+    --mono: 'IBM Plex Mono', 'SF Mono', 'Consolas', monospace;
+    --sans: 'Space Grotesk', system-ui, sans-serif;
+  }
+
+  /* Single-theme: dark instrument panel. Explicit everything. */
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 4rem;
+  }
+
+  /* ---- Header ---- */
+  .header {
+    margin-bottom: 3rem;
+  }
+
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    padding: 0.25em 0.7em;
+    border-radius: 3px;
+    margin-bottom: 0.75rem;
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+    max-width: 52ch;
+  }
+
+  /* ---- Device badge ---- */
+  .device-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 1rem;
+    margin-top: 1.25rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+  }
+
+  .device-badge .label {
+    color: var(--text-muted);
+  }
+
+  .device-badge .value {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .device-badge .sep {
+    color: var(--border);
+  }
+
+  /* ---- Section ---- */
+  .section {
+    margin-top: 2.5rem;
+  }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ---- DVFS Table ---- */
+  .dvfs-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dvfs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dvfs-table th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  .dvfs-table th:nth-child(n+2) { text-align: right; }
+
+  .dvfs-table td {
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid rgba(42, 46, 58, 0.5);
+    white-space: nowrap;
+  }
+
+  .dvfs-table td:nth-child(n+2) { text-align: right; }
+
+  .dvfs-table tr.corner-boundary td {
+    border-top: 1px solid var(--corner-line);
+  }
+
+  .dvfs-table .pstate-name {
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .dvfs-table .idle-row .pstate-name { color: var(--idle); }
+  .dvfs-table .base-row .pstate-name { color: var(--base); }
+  .dvfs-table .peak-row .pstate-name { color: var(--peak); }
+
+  .dvfs-table .freq-val { color: var(--accent); }
+  .dvfs-table .volt-val { color: var(--voltage-hi); }
+  .dvfs-table .sram-val { color: var(--text-dim); }
+
+  .dvfs-table .corner-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    background: var(--surface);
+    padding: 0.1em 0.4em;
+    border-radius: 2px;
+    margin-left: 0.3rem;
+  }
+
+  .dvfs-table .same-v {
+    color: var(--voltage-hi);
+    opacity: 0.6;
+    font-size: 0.65rem;
+  }
+
+  /* ---- Corner diagram ---- */
+  .corner-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .corner-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+  }
+
+  .corner-card .corner-name {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+  }
+
+  .corner-card .voltage {
+    font-family: var(--mono);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--voltage-hi);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .corner-card .voltage .unit {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  .corner-card .freq-pair {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+
+  .corner-card .freq-pair .lo { color: var(--voltage-lo); }
+  .corner-card .freq-pair .hi { color: var(--accent); }
+
+  .corner-card .freq-pair .arrow {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+  }
+
+  .corner-card .delta {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+  }
+
+  /* ---- Power chart (canvas) ---- */
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+    position: relative;
+  }
+
+  .chart-container canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .chart-legend {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.75rem;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: var(--text-dim);
+  }
+
+  .chart-legend .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 0.3rem;
+    vertical-align: middle;
+  }
+
+  /* ---- Stats row ---- */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+  }
+
+  .stat-card .stat-label {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .stat-card .stat-value {
+    font-family: var(--mono);
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 0.2rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-card .stat-value .unit {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-dim);
+  }
+
+  .stat-card .stat-note {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+  }
+
+  /* ---- SRAM floor callout ---- */
+  .callout {
+    background: var(--sram-fill);
+    border: 1px solid rgba(224, 137, 79, 0.2);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .callout strong {
+    color: var(--voltage-hi);
+    font-weight: 500;
+  }
+
+  .callout code {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    background: rgba(0,0,0,0.25);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    color: var(--text);
+  }
+
+  /* ---- Behavior section ---- */
+  .behavior-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  @media (max-width: 600px) {
+    .behavior-cols { grid-template-columns: 1fr; }
+    .corner-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  .behavior-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+  }
+
+  .behavior-card .bh-title {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .behavior-card p {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    line-height: 1.55;
+  }
+
+  .behavior-card .val {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-weight: 500;
+  }
+
+  /* ---- Repro block ---- */
+  .repro-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .repro-block .repro-header {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 0.6rem 1rem;
+    background: var(--surface-raised);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .repro-block pre {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+    padding: 1rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .repro-block pre .cmd { color: var(--accent); }
+  .repro-block pre .comment { color: var(--text-muted); }
+  .repro-block pre .output { color: var(--text); opacity: 0.7; }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+
+<div class="page">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="chip">Reverse Engineering</div>
+    <h1>Apple M4 GPU DVFS Voltage Corners</h1>
+    <p class="subtitle">Device-tree extraction of all 16 P-states, 11 voltage levels, and 5 paired corners — with a reproducible Metal compute benchmark.</p>
+    <div class="device-badge">
+      <span class="label">SoC</span> <span class="value">Apple M4</span>
+      <span class="sep">|</span>
+      <span class="label">GPU</span> <span class="value">AGXAcceleratorG16G</span>
+      <span class="sep">|</span>
+      <span class="label">DT</span> <span class="value">gpu,t8132</span>
+      <span class="sep">|</span>
+      <span class="label">Cores</span> <span class="value">10</span>
+    </div>
+  </header>
+
+  <!-- Key stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">P-States</div>
+      <div class="stat-value">16</div>
+      <div class="stat-note">P0 idle + P1–P15</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Voltage Range</div>
+      <div class="stat-value">125<span class="unit"> – </span>1055 <span class="unit">mV</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Freq Range</div>
+      <div class="stat-value">338<span class="unit"> – </span>1578 <span class="unit">MHz</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Peak Power</div>
+      <div class="stat-value">~16 <span class="unit">W</span></div>
+      <div class="stat-note">measured @ P15</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Base P-State</div>
+      <div class="stat-value">P3 <span class="unit">796 MHz</span></div>
+      <div class="stat-note">gpu-perf-base-pstate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Voltage Corners</div>
+      <div class="stat-value">5</div>
+      <div class="stat-note">paired freq @ same V</div>
+    </div>
+  </div>
+
+  <!-- DVFS Table -->
+  <div class="section">
+    <div class="section-label">Complete DVFS Table</div>
+    <div class="dvfs-table-wrap">
+      <table class="dvfs-table">
+        <thead>
+          <tr>
+            <th>P-State</th>
+            <th>Freq</th>
+            <th>GPU Voltage</th>
+            <th>SRAM Voltage</th>
+            <th>Corner</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="idle-row">
+            <td><span class="pstate-name">P0</span></td>
+            <td class="freq-val">— idle</td>
+            <td class="volt-val">125 mV</td>
+            <td class="sram-val">780 mV</td>
+            <td><span class="corner-tag">retention</span></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P1</span></td>
+            <td class="freq-val">338 MHz</td>
+            <td class="volt-val">615 mV</td>
+            <td class="sram-val">780 mV</td>
+            <td></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P2</span></td>
+            <td class="freq-val">618 MHz</td>
+            <td class="volt-val">645 mV</td>
+            <td class="sram-val">780 mV</td>
+            <td></td>
+          </tr>
+          <tr class="base-row">
+            <td><span class="pstate-name">P3</span> <span class="corner-tag">base</span></td>
+            <td class="freq-val">796 MHz</td>
+            <td class="volt-val">680 mV</td>
+            <td class="sram-val">780 mV</td>
+            <td></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P4</span></td>
+            <td class="freq-val">928 MHz</td>
+            <td class="volt-val">725 mV</td>
+            <td class="sram-val">780 mV</td>
+            <td></td>
+          </tr>
+          <tr class="corner-boundary">
+            <td><span class="pstate-name">P5</span></td>
+            <td class="freq-val">952 MHz</td>
+            <td class="volt-val">780 mV</td>
+            <td class="sram-val">780 mV</td>
+            <td><span class="corner-tag">A · lo</span></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P6</span></td>
+            <td class="freq-val">1056 MHz</td>
+            <td class="volt-val">780 mV</td>
+            <td class="sram-val">780 mV</td>
+            <td><span class="corner-tag">A · hi</span> <span class="same-v">+104 MHz</span></td>
+          </tr>
+          <tr class="corner-boundary">
+            <td><span class="pstate-name">P7</span></td>
+            <td class="freq-val">1053 MHz</td>
+            <td class="volt-val">835 mV</td>
+            <td class="sram-val">835 mV</td>
+            <td><span class="corner-tag">B · lo</span></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P8</span></td>
+            <td class="freq-val">1170 MHz</td>
+            <td class="volt-val">835 mV</td>
+            <td class="sram-val">835 mV</td>
+            <td><span class="corner-tag">B · hi</span> <span class="same-v">+117 MHz</span></td>
+          </tr>
+          <tr class="corner-boundary">
+            <td><span class="pstate-name">P9</span></td>
+            <td class="freq-val">1152 MHz</td>
+            <td class="volt-val">875 mV</td>
+            <td class="sram-val">875 mV</td>
+            <td><span class="corner-tag">C · lo</span></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P10</span></td>
+            <td class="freq-val">1278 MHz</td>
+            <td class="volt-val">875 mV</td>
+            <td class="sram-val">875 mV</td>
+            <td><span class="corner-tag">C · hi</span> <span class="same-v">+126 MHz</span></td>
+          </tr>
+          <tr class="corner-boundary">
+            <td><span class="pstate-name">P11</span></td>
+            <td class="freq-val">1204 MHz</td>
+            <td class="volt-val">905 mV</td>
+            <td class="sram-val">905 mV</td>
+            <td><span class="corner-tag">D · lo</span></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P12</span></td>
+            <td class="freq-val">1338 MHz</td>
+            <td class="volt-val">905 mV</td>
+            <td class="sram-val">905 mV</td>
+            <td><span class="corner-tag">D · hi</span> <span class="same-v">+134 MHz</span></td>
+          </tr>
+          <tr class="corner-boundary">
+            <td><span class="pstate-name">P13</span></td>
+            <td class="freq-val">1326 MHz</td>
+            <td class="volt-val">980 mV</td>
+            <td class="sram-val">980 mV</td>
+            <td><span class="corner-tag">E · lo</span></td>
+          </tr>
+          <tr>
+            <td><span class="pstate-name">P14</span></td>
+            <td class="freq-val">1470 MHz</td>
+            <td class="volt-val">980 mV</td>
+            <td class="sram-val">980 mV</td>
+            <td><span class="corner-tag">E · hi</span> <span class="same-v">+144 MHz</span></td>
+          </tr>
+          <tr class="peak-row">
+            <td><span class="pstate-name">P15</span> <span class="corner-tag">peak</span></td>
+            <td class="freq-val">1578 MHz</td>
+            <td class="volt-val">1055 mV</td>
+            <td class="sram-val">1055 mV</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Voltage Corner Cards -->
+  <div class="section">
+    <div class="section-label">Voltage Corners — Paired Frequencies at Same Voltage</div>
+    <div class="corner-grid">
+      <div class="corner-card">
+        <div class="corner-name">Corner A</div>
+        <div class="voltage">780 <span class="unit">mV</span></div>
+        <div class="freq-pair">
+          <span class="lo">952</span>
+          <span class="arrow">→</span>
+          <span class="hi">1056 MHz</span>
+        </div>
+        <div class="delta">Δ 104 MHz · SRAM floor</div>
+      </div>
+      <div class="corner-card">
+        <div class="corner-name">Corner B</div>
+        <div class="voltage">835 <span class="unit">mV</span></div>
+        <div class="freq-pair">
+          <span class="lo">1053</span>
+          <span class="arrow">→</span>
+          <span class="hi">1170 MHz</span>
+        </div>
+        <div class="delta">Δ 117 MHz</div>
+      </div>
+      <div class="corner-card">
+        <div class="corner-name">Corner C</div>
+        <div class="voltage">875 <span class="unit">mV</span></div>
+        <div class="freq-pair">
+          <span class="lo">1152</span>
+          <span class="arrow">→</span>
+          <span class="hi">1278 MHz</span>
+        </div>
+        <div class="delta">Δ 126 MHz</div>
+      </div>
+      <div class="corner-card">
+        <div class="corner-name">Corner D</div>
+        <div class="voltage">905 <span class="unit">mV</span></div>
+        <div class="freq-pair">
+          <span class="lo">1204</span>
+          <span class="arrow">→</span>
+          <span class="hi">1338 MHz</span>
+        </div>
+        <div class="delta">Δ 134 MHz</div>
+      </div>
+      <div class="corner-card">
+        <div class="corner-name">Corner E</div>
+        <div class="voltage">980 <span class="unit">mV</span></div>
+        <div class="freq-pair">
+          <span class="lo">1326</span>
+          <span class="arrow">→</span>
+          <span class="hi">1470 MHz</span>
+        </div>
+        <div class="delta">Δ 144 MHz</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Freq-Voltage Chart -->
+  <div class="section">
+    <div class="section-label">Frequency vs Voltage (non-monotonic staircase)</div>
+    <div class="chart-container">
+      <canvas id="fv-chart" width="880" height="320"></canvas>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--accent)"></span> GPU active voltage</span>
+        <span><span class="swatch" style="background:var(--voltage-hi)"></span> SRAM retention voltage</span>
+        <span><span class="swatch" style="background:rgba(255,255,255,0.15)"></span> Voltage corner bands</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Power Sweep Chart -->
+  <div class="section">
+    <div class="section-label">Measured Power Sweep (powermetrics, 100ms sample)</div>
+    <div class="chart-container">
+      <canvas id="power-chart" width="880" height="280"></canvas>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--accent)"></span> GPU Power (mW)</span>
+        <span><span class="swatch" style="background:var(--peak)"></span> Frequency (MHz)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Matmul DVFS Scaling -->
+  <div class="section">
+    <div class="section-label">Matmul GFLOPS vs Matrix Size — DVFS Scaling Effect</div>
+    <div class="chart-container">
+      <canvas id="matmul-chart" width="880" height="320"></canvas>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--accent)"></span> GFLOPS (tiled FP32 matmul)</span>
+        <span><span class="swatch" style="background:rgba(91,158,91,0.5)"></span> DVFS ramp zone</span>
+        <span><span class="swatch" style="background:rgba(212,93,93,0.4)"></span> P15 locked (peak)</span>
+      </div>
+    </div>
+    <div class="behavior-cols" style="margin-top: 0.75rem;">
+      <div class="behavior-card">
+        <div class="bh-title">DVFS ramp zone (16–768)</div>
+        <p>Small matrices under-utilize the GPU. DVFS stays at <span class="val">P3 (796 MHz)</span> or ramps slowly. GFLOPS climbs from <span class="val">1.8</span> to <span class="val">290</span> — a <span class="val">160×</span> range driven mostly by frequency scaling + occupancy.</p>
+      </div>
+      <div class="behavior-card">
+        <div class="bh-title">P15 plateau (1024+)</div>
+        <p>Once the grid saturates the GPU, DVFS locks at <span class="val">P15 (1578 MHz)</span>. GFLOPS stabilizes at <span class="val">~554</span> — the ceiling of this tiled kernel (53% of theoretical 1010 GFLOPS FP32 FMA). Simdgroup MMA would push higher.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SRAM Floor Callout -->
+  <div class="section">
+    <div class="callout">
+      <strong>SRAM retention floor:</strong> The <code>perf-states-sram</code> table shows SRAM voltage holds at <strong>780 mV</strong> for P0–P6 while GPU active voltage runs as low as 125 mV. From P7 onward, SRAM and GPU voltages match. This means the GPU's register file and on-chip SRAM cannot operate below 780 mV — the lower P-states reduce only the logic voltage, keeping SRAM data intact at the floor.
+    </div>
+  </div>
+
+  <!-- DVFS Behavior -->
+  <div class="section">
+    <div class="section-label">Observed DVFS Behavior</div>
+    <div class="behavior-cols">
+      <div class="behavior-card">
+        <div class="bh-title">Binary switching</div>
+        <p>The CLPC controller is aggressive: light loads sit at <span class="val">P3 (796 MHz)</span>, and any substantial compute jumps directly to <span class="val">P15 (1578 MHz)</span>. Intermediate P-states are transient — used during ramp-up/down but not sustained. Power scales via clock/power gating within P15, not by stepping through P-states.</p>
+      </div>
+      <div class="behavior-card">
+        <div class="bh-title">Power envelope</div>
+        <p>At P15, GPU power ranges from <span class="val">~2.5 W</span> (low-thread dispatches) to <span class="val">~16 W</span> (1M threads × 65K FMA iterations). The controller modulates power within P15 via per-core clock gating rather than downclocking to P12 or P10. This is Apple's efficiency play: one voltage rail, fine-grained gating.</p>
+      </div>
+      <div class="behavior-card">
+        <div class="bh-title">Corner pair pattern</div>
+        <p>Each voltage corner (A–E) offers two frequencies: a "lo" (energy-efficient divider) and "hi" (max clock the silicon signs off at that voltage). The <span class="val">Δ increases with voltage</span> — 104 MHz at 780 mV, 144 MHz at 980 mV — reflecting wider timing margin at higher voltages. The CLPC picks between them based on thermal headroom.</p>
+      </div>
+      <div class="behavior-card">
+        <div class="bh-title">Implications for benchmarking</div>
+        <p>Kernel benchmarks on M4 GPU are effectively always at <span class="val">1578 MHz</span> once the dispatch is non-trivial. The DVFS contribution to variance is minimal — thermal throttling (not P-state stepping) is the primary noise source. Warm the GPU for ~2s before timing to ensure P15 lock-in.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Extraction Method -->
+  <div class="section">
+    <div class="section-label">Extraction Method</div>
+    <div class="repro-block">
+      <div class="repro-header">Device Tree — IORegistry</div>
+      <pre><span class="comment"># Dump GPU device node properties</span>
+<span class="cmd">ioreg -l -w 0 -r -c AppleARMIODevice</span> | grep -A200 '"compatible" = <"gpu,t8132">'
+
+<span class="comment"># Key properties:</span>
+<span class="output">  "perf-states"          = &lt;...&gt;   # 16 × 8-byte entries: [freq_Hz(u32), voltage_mV(u32)]</span>
+<span class="output">  "perf-states-sram"     = &lt;...&gt;   # same format, SRAM retention voltages</span>
+<span class="output">  "gpu-num-perf-states"  = &lt;0f000000&gt;   # 15 (little-endian)</span>
+<span class="output">  "perf-state-count"     = &lt;10000000&gt;   # 16 including idle</span>
+<span class="output">  "gpu-perf-base-pstate" = &lt;03000000&gt;   # P3 = 796 MHz base</span></pre>
+    </div>
+    <div class="repro-block" style="margin-top: 0.75rem;">
+      <div class="repro-header">Power Measurement — powermetrics</div>
+      <pre><span class="comment"># Live GPU frequency + power + per-P-state residency</span>
+<span class="cmd">sudo powermetrics --samplers gpu_power -i 100 -n 100</span>
+
+<span class="comment"># Output includes:</span>
+<span class="output">  GPU HW active frequency: 1578 MHz</span>
+<span class="output">  GPU HW active residency: 99.2% (338 MHz: 0% ... 1578 MHz: 99.2%)</span>
+<span class="output">  GPU SW requested state: (P1: 0% ... P15: 100%)</span>
+<span class="output">  GPU Power: 13421 mW</span></pre>
+    </div>
+    <div class="repro-block" style="margin-top: 0.75rem;">
+      <div class="repro-header">Decode perf-states blob</div>
+      <pre><span class="cmd">python3 -c "</span>
+<span class="cmd">import struct</span>
+<span class="cmd">blob = bytes.fromhex('000000007d000000807825146702000080eed524...')</span>
+<span class="cmd">for i in range(16):</span>
+<span class="cmd">    freq, mv = struct.unpack_from('&lt;II', blob, i*8)</span>
+<span class="cmd">    print(f'P{i}: {freq/1e6:.0f} MHz  {mv} mV')</span>
+<span class="cmd">"</span></pre>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <span>M4 Mac16,10 · macOS 25D125 · AGXMetalG16G_B0 · IOSourceVersion 345.20.4</span>
+    <span>2026-08-23</span>
+  </footer>
+</div>
+
+<script>
+// ---- Freq vs Voltage chart ----
+(function() {
+  const canvas = document.getElementById('fv-chart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 880 * dpr;
+  canvas.height = 320 * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = 880, H = 320;
+  const pad = { top: 20, right: 60, bottom: 40, left: 60 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  const ps = [
+    { p: 0, f: 0, v: 125, sv: 780 },
+    { p: 1, f: 338, v: 615, sv: 780 },
+    { p: 2, f: 618, v: 645, sv: 780 },
+    { p: 3, f: 796, v: 680, sv: 780 },
+    { p: 4, f: 928, v: 725, sv: 780 },
+    { p: 5, f: 952, v: 780, sv: 780 },
+    { p: 6, f: 1056, v: 780, sv: 780 },
+    { p: 7, f: 1053, v: 835, sv: 835 },
+    { p: 8, f: 1170, v: 835, sv: 835 },
+    { p: 9, f: 1152, v: 875, sv: 875 },
+    { p: 10, f: 1278, v: 875, sv: 875 },
+    { p: 11, f: 1204, v: 905, sv: 905 },
+    { p: 12, f: 1338, v: 905, sv: 905 },
+    { p: 13, f: 1326, v: 980, sv: 980 },
+    { p: 14, f: 1470, v: 980, sv: 980 },
+    { p: 15, f: 1578, v: 1055, sv: 1055 },
+  ];
+
+  const maxF = 1700, maxV = 1150;
+  const xOf = f => pad.left + (f / maxF) * pw;
+  const yOf = v => pad.top + ph - (v / maxV) * ph;
+
+  // Grid
+  ctx.strokeStyle = '#1e222e';
+  ctx.lineWidth = 1;
+  for (let v = 200; v <= 1100; v += 200) {
+    ctx.beginPath();
+    ctx.moveTo(pad.left, yOf(v));
+    ctx.lineTo(W - pad.right, yOf(v));
+    ctx.stroke();
+  }
+  for (let f = 400; f <= 1600; f += 400) {
+    ctx.beginPath();
+    ctx.moveTo(xOf(f), pad.top);
+    ctx.lineTo(xOf(f), H - pad.bottom);
+    ctx.stroke();
+  }
+
+  // Corner bands (same-voltage pairs)
+  const corners = [
+    { v: 780, lo: 952, hi: 1056, label: 'A' },
+    { v: 835, lo: 1053, hi: 1170, label: 'B' },
+    { v: 875, lo: 1152, hi: 1278, label: 'C' },
+    { v: 905, lo: 1204, hi: 1338, label: 'D' },
+    { v: 980, lo: 1326, hi: 1470, label: 'E' },
+  ];
+
+  corners.forEach(c => {
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    const y = yOf(c.v);
+    ctx.fillRect(xOf(c.lo) - 4, y - 8, xOf(c.hi) - xOf(c.lo) + 8, 16);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(xOf(c.lo), y);
+    ctx.lineTo(xOf(c.hi), y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.font = '10px "IBM Plex Mono"';
+    ctx.fillStyle = '#4e5568';
+    ctx.textAlign = 'center';
+    ctx.fillText(c.label, xOf((c.lo + c.hi) / 2), y - 12);
+  });
+
+  // SRAM voltage line
+  ctx.strokeStyle = '#e0894f';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.globalAlpha = 0.4;
+  ctx.beginPath();
+  ps.filter(p => p.f > 0).forEach((p, i) => {
+    const x = xOf(p.f), y = yOf(p.sv);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // GPU voltage line
+  ctx.strokeStyle = '#4fa8e0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ps.filter(p => p.f > 0).forEach((p, i) => {
+    const x = xOf(p.f), y = yOf(p.v);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Data points
+  ps.filter(p => p.f > 0).forEach(p => {
+    const x = xOf(p.f), y = yOf(p.v);
+
+    ctx.fillStyle = p.p === 3 ? '#5b9e5b' : p.p === 15 ? '#d45d5d' : '#4fa8e0';
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#0c0e12';
+    ctx.beginPath();
+    ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Axis labels
+  ctx.font = '10px "IBM Plex Mono"';
+  ctx.fillStyle = '#4e5568';
+  ctx.textAlign = 'center';
+  for (let f = 0; f <= 1600; f += 400) {
+    ctx.fillText(f + '', xOf(f), H - pad.bottom + 18);
+  }
+  ctx.fillText('Frequency (MHz)', W / 2, H - 4);
+
+  ctx.textAlign = 'right';
+  for (let v = 200; v <= 1000; v += 200) {
+    ctx.fillText(v + '', pad.left - 8, yOf(v) + 4);
+  }
+  ctx.save();
+  ctx.translate(14, H / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('Voltage (mV)', 0, 0);
+  ctx.restore();
+
+  // P-state labels for base and peak
+  ctx.font = '9px "IBM Plex Mono"';
+  ctx.fillStyle = '#5b9e5b';
+  ctx.textAlign = 'left';
+  ctx.fillText('P3 base', xOf(796) + 8, yOf(680) - 6);
+  ctx.fillStyle = '#d45d5d';
+  ctx.fillText('P15 peak', xOf(1578) + 8, yOf(1055) - 6);
+})();
+
+// ---- Power sweep chart ----
+(function() {
+  const canvas = document.getElementById('power-chart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 880 * dpr;
+  canvas.height = 280 * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = 880, H = 280;
+  const pad = { top: 15, right: 60, bottom: 35, left: 60 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  // Representative measured data (sampled from the 1314-sample sweep)
+  const data = [
+    // level: ultra-low, freq ~740-796 MHz, power 0-28 mW
+    {f:740,p:0},{f:752,p:10},{f:767,p:9},{f:735,p:9},{f:695,p:9},
+    {f:657,p:0},{f:731,p:9},{f:724,p:19},{f:744,p:19},{f:673,p:9},
+    // level: low, freq 796, power ~50-120 mW
+    {f:796,p:56},{f:796,p:47},{f:796,p:56},{f:796,p:103},{f:796,p:120},
+    {f:796,p:141},{f:796,p:158},{f:796,p:169},{f:796,p:215},{f:796,p:234},
+    // level: medium-low → ramp
+    {f:796,p:280},{f:796,p:328},{f:796,p:283},{f:796,p:330},
+    {f:1552,p:1887},{f:1578,p:2187},{f:1578,p:2574},{f:1578,p:2721},
+    // level: medium
+    {f:1578,p:2817},{f:1578,p:2602},{f:1578,p:2592},{f:1578,p:2484},
+    {f:1578,p:3214},{f:1578,p:3459},{f:1578,p:3685},{f:1578,p:3453},
+    // level: medium-high
+    {f:1578,p:4735},{f:1578,p:4822},{f:1578,p:6583},{f:1578,p:6730},
+    {f:1578,p:6614},{f:1578,p:6539},{f:1578,p:6592},{f:1578,p:6617},
+    // level: high
+    {f:1578,p:7113},{f:1578,p:9299},{f:1578,p:8486},{f:1578,p:9810},
+    {f:1578,p:10619},{f:1578,p:10608},{f:1578,p:10647},
+    // level: very high → peak
+    {f:1578,p:12236},{f:1578,p:12253},{f:1578,p:12278},{f:1578,p:13175},
+    {f:1578,p:13207},{f:1578,p:13458},{f:1578,p:13500},{f:1578,p:13700},
+    {f:1578,p:14060},{f:1578,p:14151},{f:1578,p:15038},{f:1578,p:15986},
+    {f:1578,p:13826},{f:1578,p:13680},{f:1578,p:14826},
+  ];
+
+  const n = data.length;
+  const maxP = 17000;
+  const maxF = 1700;
+  const xOf = i => pad.left + (i / (n - 1)) * pw;
+  const yP = p => pad.top + ph - (p / maxP) * ph;
+  const yF = f => pad.top + ph - (f / maxF) * ph;
+
+  // Grid
+  ctx.strokeStyle = '#1e222e';
+  ctx.lineWidth = 1;
+  for (let p = 4000; p <= 16000; p += 4000) {
+    ctx.beginPath();
+    ctx.moveTo(pad.left, yP(p));
+    ctx.lineTo(W - pad.right, yP(p));
+    ctx.stroke();
+  }
+
+  // Power area fill
+  ctx.fillStyle = 'rgba(79, 168, 224, 0.08)';
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yP(0));
+  data.forEach((d, i) => ctx.lineTo(xOf(i), yP(d.p)));
+  ctx.lineTo(xOf(n - 1), yP(0));
+  ctx.closePath();
+  ctx.fill();
+
+  // Power line
+  ctx.strokeStyle = '#4fa8e0';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yP(d.p)) : ctx.lineTo(xOf(i), yP(d.p));
+  });
+  ctx.stroke();
+
+  // Frequency line (secondary axis)
+  ctx.strokeStyle = '#d45d5d';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yF(d.f)) : ctx.lineTo(xOf(i), yF(d.f));
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Mark the ramp point
+  const rampIdx = data.findIndex(d => d.f > 1500);
+  if (rampIdx > 0) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath();
+    ctx.moveTo(xOf(rampIdx), pad.top);
+    ctx.lineTo(xOf(rampIdx), H - pad.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.font = '9px "IBM Plex Mono"';
+    ctx.fillStyle = '#4e5568';
+    ctx.textAlign = 'center';
+    ctx.fillText('DVFS ramp P3→P15', xOf(rampIdx), pad.top - 4);
+  }
+
+  // Left axis (power)
+  ctx.font = '10px "IBM Plex Mono"';
+  ctx.fillStyle = '#4e5568';
+  ctx.textAlign = 'right';
+  for (let p = 0; p <= 16000; p += 4000) {
+    ctx.fillText((p / 1000).toFixed(0) + 'W', pad.left - 8, yP(p) + 4);
+  }
+
+  // Right axis (freq)
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#d45d5d';
+  for (let f = 400; f <= 1600; f += 400) {
+    ctx.fillText(f + '', W - pad.right + 8, yF(f) + 4);
+    ctx.globalAlpha = 0.15;
+    ctx.fillText('MHz', W - pad.right + 36, yF(f) + 4);
+    ctx.globalAlpha = 1;
+  }
+
+  // Bottom label
+  ctx.fillStyle = '#4e5568';
+  ctx.textAlign = 'center';
+  ctx.fillText('Sample index (increasing compute intensity →)', W / 2, H - 4);
+})();
+
+// ---- Matmul DVFS scaling chart ----
+(function() {
+  const canvas = document.getElementById('matmul-chart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 880 * dpr;
+  canvas.height = 320 * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = 880, H = 320;
+  const pad = { top: 20, right: 30, bottom: 45, left: 60 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  // Measured data from M4 (best-of-N, GPU time)
+  const data = [
+    {sz:16, gf:1.77}, {sz:32, gf:11.92}, {sz:48, gf:32.77}, {sz:64, gf:63.55},
+    {sz:96, gf:141.09}, {sz:128, gf:185.73}, {sz:192, gf:234.46}, {sz:256, gf:254.92},
+    {sz:384, gf:266.70}, {sz:512, gf:273.39}, {sz:640, gf:275.89}, {sz:768, gf:290.20},
+    {sz:1024, gf:552.34}, {sz:1280, gf:553.44}, {sz:1536, gf:554.26},
+    {sz:2048, gf:554.63}, {sz:2560, gf:552.35}, {sz:3072, gf:552.32}, {sz:4096, gf:550.53},
+  ];
+
+  // Log scale for X axis
+  const logMin = Math.log10(16), logMax = Math.log10(4096);
+  const maxGF = 620;
+  const xOf = sz => pad.left + ((Math.log10(sz) - logMin) / (logMax - logMin)) * pw;
+  const yOf = gf => pad.top + ph - (gf / maxGF) * ph;
+
+  // Background zones
+  // DVFS ramp zone (16-768)
+  ctx.fillStyle = 'rgba(91, 158, 91, 0.04)';
+  ctx.fillRect(xOf(16), pad.top, xOf(768) - xOf(16), ph);
+
+  // P15 locked zone (1024+)
+  ctx.fillStyle = 'rgba(212, 93, 93, 0.04)';
+  ctx.fillRect(xOf(1024), pad.top, xOf(4096) - xOf(1024), ph);
+
+  // Zone boundary
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(xOf(900), pad.top);
+  ctx.lineTo(xOf(900), H - pad.bottom);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.font = '9px "IBM Plex Mono"';
+  ctx.fillStyle = '#5b9e5b';
+  ctx.textAlign = 'right';
+  ctx.fillText('DVFS ramp', xOf(900) - 6, pad.top + 14);
+  ctx.fillStyle = '#d45d5d';
+  ctx.textAlign = 'left';
+  ctx.fillText('P15 locked', xOf(900) + 6, pad.top + 14);
+
+  // Grid
+  ctx.strokeStyle = '#1e222e';
+  ctx.lineWidth = 1;
+  for (let gf = 100; gf <= 600; gf += 100) {
+    ctx.beginPath();
+    ctx.moveTo(pad.left, yOf(gf));
+    ctx.lineTo(W - pad.right, yOf(gf));
+    ctx.stroke();
+  }
+
+  // Area fill under curve
+  ctx.fillStyle = 'rgba(79, 168, 224, 0.06)';
+  ctx.beginPath();
+  ctx.moveTo(xOf(data[0].sz), yOf(0));
+  data.forEach(d => ctx.lineTo(xOf(d.sz), yOf(d.gf)));
+  ctx.lineTo(xOf(data[data.length-1].sz), yOf(0));
+  ctx.closePath();
+  ctx.fill();
+
+  // Line
+  ctx.strokeStyle = '#4fa8e0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    i === 0 ? ctx.moveTo(xOf(d.sz), yOf(d.gf)) : ctx.lineTo(xOf(d.sz), yOf(d.gf));
+  });
+  ctx.stroke();
+
+  // Data points
+  data.forEach(d => {
+    const x = xOf(d.sz), y = yOf(d.gf);
+    ctx.fillStyle = d.sz >= 1024 ? '#d45d5d' : d.sz <= 64 ? '#5b9e5b' : '#4fa8e0';
+    ctx.beginPath();
+    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0c0e12';
+    ctx.beginPath();
+    ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Plateau line at ~554
+  ctx.strokeStyle = 'rgba(212, 93, 93, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 5]);
+  ctx.beginPath();
+  ctx.moveTo(pad.left, yOf(554));
+  ctx.lineTo(W - pad.right, yOf(554));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.font = '9px "IBM Plex Mono"';
+  ctx.fillStyle = '#d45d5d';
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = 0.6;
+  ctx.fillText('554 GFLOPS plateau', W - pad.right - 120, yOf(554) - 6);
+  ctx.globalAlpha = 1;
+
+  // Key value annotations
+  ctx.font = '8px "IBM Plex Mono"';
+  ctx.fillStyle = '#7a8194';
+  ctx.textAlign = 'center';
+  ctx.fillText('1.8', xOf(16), yOf(1.77) - 8);
+  ctx.fillText('64', xOf(64), yOf(63.55) - 8);
+  ctx.fillText('255', xOf(256), yOf(254.92) - 8);
+  ctx.fillText('554', xOf(2048), yOf(554.63) - 8);
+
+  // X axis labels
+  ctx.font = '10px "IBM Plex Mono"';
+  ctx.fillStyle = '#4e5568';
+  ctx.textAlign = 'center';
+  [16, 32, 64, 128, 256, 512, 1024, 2048, 4096].forEach(sz => {
+    ctx.fillText(sz + '', xOf(sz), H - pad.bottom + 16);
+  });
+  ctx.fillText('Matrix size (N×N)', W / 2, H - 4);
+
+  // Y axis labels
+  ctx.textAlign = 'right';
+  for (let gf = 0; gf <= 600; gf += 100) {
+    ctx.fillText(gf + '', pad.left - 8, yOf(gf) + 4);
+  }
+  ctx.save();
+  ctx.translate(14, H / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('GFLOPS (FP32)', 0, 0);
+  ctx.restore();
+})();
+</script>
