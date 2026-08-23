@@ -1,7 +1,7 @@
 #!/bin/bash
 # gpu-dvfs — wrapper for gpu_freq_ctl (Apple Silicon GPU DVFS control)
 #
-# Handles build, provides nice subcommands, wraps powermetrics.
+# Handles build, provides nice subcommands, named presets, powermetrics.
 # Run without arguments for help.
 
 set -euo pipefail
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BINARY="$SCRIPT_DIR/gpu_freq_ctl"
 SOURCE="$SCRIPT_DIR/gpu_freq_ctl.m"
 
-# Colors
+# Colors (disabled if not a terminal)
 if [ -t 1 ]; then
     RED='\033[31m'; GREEN='\033[32m'; YELLOW='\033[33m'
     BLUE='\033[34m'; CYAN='\033[36m'; BOLD='\033[1m'
@@ -24,19 +24,17 @@ log_ok()    { echo -e "${GREEN}✓${RESET} $*"; }
 log_warn()  { echo -e "${YELLOW}⚠${RESET} $*"; }
 log_err()   { echo -e "${RED}✗${RESET} $*" >&2; }
 
-# ─── Requirements check ─────────────────────────────────────────────────────
+# ─── Requirements ──────────────────────────────────────────────────────────
 
 check_requirements() {
     if [[ "$(uname)" != "Darwin" ]]; then
         log_err "This tool requires macOS with Apple Silicon"
         exit 1
     fi
-
     if ! sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi "apple"; then
         log_err "Apple Silicon required (detected: $(sysctl -n machdep.cpu.brand_string 2>/dev/null))"
         exit 1
     fi
-
     if ! command -v xcrun &>/dev/null; then
         log_err "Xcode Command Line Tools required"
         echo "  Install with: xcode-select --install"
@@ -44,7 +42,7 @@ check_requirements() {
     fi
 }
 
-# ─── Build ───────────────────────────────────────────────────────────────────
+# ─── Build ─────────────────────────────────────────────────────────────────
 
 build_if_needed() {
     if [ ! -f "$BINARY" ] || [ "$SOURCE" -nt "$BINARY" ]; then
@@ -55,34 +53,99 @@ build_if_needed() {
     fi
 }
 
-# ─── Commands ────────────────────────────────────────────────────────────────
+# ─── Preset mapping ────────────────────────────────────────────────────────
+
+resolve_preset() {
+    local input="$1"
+    case "$input" in
+        min|minimum|lowest)   echo "1"   ;;
+        low)                  echo "2"   ;;
+        medium-low|medlow)    echo "3"   ;;
+        medium|med)           echo "5"   ;;
+        medium-high|medhigh)  echo "8"   ;;
+        high)                 echo "10"  ;;
+        max|full|uncap)       echo "uncap" ;;
+        *)
+            # Check if it's a number (watts)
+            if [[ "$input" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                echo "$input"
+            else
+                echo ""
+            fi
+            ;;
+    esac
+}
+
+# ─── Commands ──────────────────────────────────────────────────────────────
 
 cmd_help() {
     echo -e "${BOLD}gpu-dvfs${RESET} — Apple Silicon GPU frequency control"
     echo ""
-    echo -e "  ${CYAN}gpu-dvfs status${RESET}           Show GPU state, CLPC config, measured speed"
-    echo -e "  ${CYAN}gpu-dvfs cap${RESET} <watts>      Throttle GPU (e.g. 'cap 2' for 2W limit)"
-    echo -e "  ${CYAN}gpu-dvfs uncap${RESET}            Restore original GPU speed"
-    echo -e "  ${CYAN}gpu-dvfs sweep${RESET}            Sweep power levels, show GFLOPS at each"
-    echo -e "  ${CYAN}gpu-dvfs table${RESET}            Print hardware DVFS P-state table"
-    echo -e "  ${CYAN}gpu-dvfs info${RESET}             Detect SoC and GPU configuration"
-    echo -e "  ${CYAN}gpu-dvfs monitor${RESET}          Live GPU frequency + power (powermetrics)"
-    echo -e "  ${CYAN}gpu-dvfs build${RESET}            Force rebuild the binary"
+    echo -e "${BOLD}Quick start:${RESET}"
+    echo -e "  ${CYAN}gpu-dvfs status${RESET}              Show GPU state + speed"
+    echo -e "  ${CYAN}gpu-dvfs set low${RESET}             Throttle GPU to low power"
+    echo -e "  ${CYAN}gpu-dvfs set max${RESET}             Restore full speed"
     echo ""
-    echo "Flags (pass after the command):"
-    echo "  -v, --verbose     Show internal IOKit operations"
-    echo "  --confirm         Verify frequency change via powermetrics"
-    echo "  --no-burn         Skip burn-in during cap (faster)"
+    echo -e "${BOLD}Named power levels:${RESET}"
+    echo -e "  ${CYAN}min${RESET}     1W   ~338 MHz    P1         (${DIM}~41 GFLOPS${RESET})"
+    echo -e "  ${CYAN}low${RESET}     2W   ~338 MHz    P1         (${DIM}~41 GFLOPS${RESET})"
+    echo -e "  ${CYAN}medium${RESET}  5W   ~950 MHz    P5-P6      (${DIM}~200 GFLOPS${RESET})"
+    echo -e "  ${CYAN}high${RESET}   10W   ~1300 MHz   P12-P14    (${DIM}~370 GFLOPS${RESET})"
+    echo -e "  ${CYAN}max${RESET}     —    ~1578 MHz   P15        (${DIM}~560 GFLOPS${RESET})"
     echo ""
-    echo -e "${DIM}Requires macOS + Apple Silicon (M1/M2/M3/M4).${RESET}"
-    echo -e "${DIM}Commands that modify DVFS need sudo.${RESET}"
+    echo -e "${BOLD}All commands:${RESET}"
+    echo -e "  ${CYAN}gpu-dvfs set${RESET} <level|watts>  Set GPU power (name or watts)"
+    echo -e "  ${CYAN}gpu-dvfs status${RESET}              CLPC config + measured speed"
+    echo -e "  ${CYAN}gpu-dvfs cap${RESET} <watts>         Raw power cap (watts)"
+    echo -e "  ${CYAN}gpu-dvfs uncap${RESET}               Restore original speed"
+    echo -e "  ${CYAN}gpu-dvfs sweep${RESET}               Sweep all levels, measure GFLOPS"
+    echo -e "  ${CYAN}gpu-dvfs table${RESET}               Hardware DVFS P-state table"
+    echo -e "  ${CYAN}gpu-dvfs info${RESET}                Detect SoC + GPU configuration"
+    echo -e "  ${CYAN}gpu-dvfs monitor${RESET}             Live GPU frequency + power"
+    echo -e "  ${CYAN}gpu-dvfs build${RESET}               Force rebuild binary"
+    echo ""
+    echo -e "${BOLD}Flags:${RESET} (pass after the command)"
+    echo "  -v, --verbose     Show IOKit calls and raw values"
+    echo "  --confirm         Verify frequency via powermetrics"
+    echo "  --no-burn         Skip 10s burn-in (faster, less reliable)"
+    echo "  --no-color        Disable colored output"
+    echo ""
+    echo -e "${DIM}Requires macOS + Apple Silicon (M1/M2/M3/M4). sudo for power control.${RESET}"
+}
+
+cmd_set() {
+    if [ $# -eq 0 ]; then
+        log_err "Usage: gpu-dvfs set <level>"
+        echo ""
+        echo "  Named levels: min, low, medium, high, max"
+        echo "  Or a watt value: gpu-dvfs set 3.5"
+        exit 1
+    fi
+
+    local level="$1"
+    shift
+    local resolved
+    resolved=$(resolve_preset "$level")
+
+    if [ -z "$resolved" ]; then
+        log_err "Unknown level: $level"
+        echo "  Valid: min, low, medium, high, max, or a number (watts)"
+        exit 1
+    fi
+
+    if [ "$resolved" = "uncap" ]; then
+        log_info "Setting GPU to ${BOLD}max${RESET} (uncapped)"
+        run_sudo uncap "$@"
+    else
+        log_info "Setting GPU to ${BOLD}${level}${RESET} (${resolved}W cap)"
+        run_sudo cap "$resolved" "$@"
+    fi
 }
 
 cmd_monitor() {
     if [ "$(id -u)" -ne 0 ]; then
-        log_err "monitor requires sudo"
-        echo "  Run: sudo gpu-dvfs monitor"
-        exit 1
+        log_warn "monitor needs sudo — re-running with sudo..."
+        exec sudo "$0" monitor "$@"
     fi
     log_info "Live GPU frequency + power (Ctrl-C to stop)"
     echo ""
@@ -95,7 +158,16 @@ cmd_build() {
     build_if_needed
 }
 
-# ─── Main ────────────────────────────────────────────────────────────────────
+run_sudo() {
+    if [ "$(id -u)" -ne 0 ]; then
+        log_warn "This needs sudo — re-running with sudo..."
+        exec sudo "$BINARY" "$@"
+    else
+        "$BINARY" "$@"
+    fi
+}
+
+# ─── Main ──────────────────────────────────────────────────────────────────
 
 check_requirements
 
@@ -106,24 +178,22 @@ case "$CMD" in
     help|--help|-h)
         cmd_help
         ;;
+    set)
+        build_if_needed
+        cmd_set "$@"
+        ;;
     build)
         cmd_build
         ;;
     monitor)
-        cmd_monitor
+        cmd_monitor "$@"
         ;;
     status|cap|uncap|sweep|table|info)
         build_if_needed
-        # table and info don't need sudo
         if [[ "$CMD" == "table" || "$CMD" == "info" ]]; then
             "$BINARY" "$CMD" "$@"
         else
-            if [ "$(id -u)" -ne 0 ]; then
-                log_warn "This command needs sudo — re-running with sudo..."
-                exec sudo "$BINARY" "$CMD" "$@"
-            else
-                "$BINARY" "$CMD" "$@"
-            fi
+            run_sudo "$CMD" "$@"
         fi
         ;;
     *)

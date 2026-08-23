@@ -6,17 +6,9 @@ kernel extensions, SIP changes, or jailbreaking.
 
 Works on **M1, M2, M3, and M4** Macs.
 
-```
-$ sudo ./gpu-dvfs cap 2
-✓ Saved original state to /tmp/.gpu_freq_ctl_saved_state
-• Setting power cap to 2.0 W...
-• Burning in GPU for 10s to trigger CLPC response...
-✓ GPU throttled: 41.0 GFLOPS (cap 2.0 W active)
-
-$ sudo ./gpu-dvfs uncap
-• Restoring saved state...
-✓ GPU recovered: 559.8 GFLOPS
-```
+<p align="center">
+  <img src="screenshot.svg" width="720" alt="gpu-dvfs terminal demo showing status, cap/uncap cycle, and DVFS table on Apple M4">
+</p>
 
 ## Requirements
 
@@ -40,59 +32,45 @@ xcrun clang -framework IOKit -framework Foundation -framework Metal -O2 \
 
 ## Usage
 
-### Show GPU info and DVFS table
+### Set GPU power level (named presets)
+
+The easiest way to control GPU frequency:
 
 ```bash
-./gpu-dvfs info         # SoC, GPU class, core count
-./gpu-dvfs table        # Full P-state table from device tree
+sudo ./gpu-dvfs set low       # Throttle to 2W → ~338 MHz
+sudo ./gpu-dvfs set medium    # Throttle to 5W → ~950 MHz
+sudo ./gpu-dvfs set high      # Throttle to 10W → ~1300 MHz
+sudo ./gpu-dvfs set max       # Restore full speed
 ```
 
-### Check current GPU state
+| Preset | Power | Approx Freq | GFLOPS |
+|--------|-------|-------------|--------|
+| `min` | 1W | 338 MHz (P1) | ~41 |
+| `low` | 2W | 338 MHz (P1) | ~41 |
+| `medium` | 5W | ~950 MHz (P5-P6) | ~200 |
+| `high` | 10W | ~1300 MHz (P12-P14) | ~370 |
+| `max` | uncap | 1578 MHz (P15) | ~560 |
+
+You can also pass a watt value directly: `sudo ./gpu-dvfs set 3.5`
+
+### Other commands
 
 ```bash
-sudo ./gpu-dvfs status
+./gpu-dvfs info              # SoC, GPU class, core count (no sudo)
+./gpu-dvfs table             # Full P-state table from device tree (no sudo)
+sudo ./gpu-dvfs status       # CLPC power budget + measured GPU speed
+sudo ./gpu-dvfs cap 2        # Raw power cap in watts
+sudo ./gpu-dvfs uncap        # Restore saved state
+sudo ./gpu-dvfs sweep        # Sweep 12 power levels, measure GFLOPS at each
+sudo ./gpu-dvfs monitor      # Live frequency + power stream (powermetrics)
 ```
 
-Shows the current CLPC power budget, whether a cap is active,
-and runs a quick matmul benchmark to measure actual GPU speed.
+### Recovery
 
-### Throttle GPU
-
-```bash
-sudo ./gpu-dvfs cap 2          # Cap to 2W → GPU drops to ~338 MHz
-sudo ./gpu-dvfs cap 4          # Cap to 4W → intermediate throttle
-sudo ./gpu-dvfs cap 2 --confirm  # Cap and verify with powermetrics
-```
-
-The tool saves the original CLPC state before modifying anything.
-
-### Restore full speed
-
-```bash
-sudo ./gpu-dvfs uncap
-```
-
-Restores all CLPC properties to their saved values. Includes a
-benchmark to confirm the GPU recovered.
-
-If the GPU stays throttled after uncap (rare, caused by CLPC PID state):
+The tool saves CLPC state before any change. `set max` or `uncap` restores it.
+If the GPU stays throttled (rare, caused by CLPC PID integrator state):
 ```bash
 sudo pmset sleepnow     # sleep/wake resets CLPC firmware
-```
-
-### Sweep power levels
-
-```bash
-sudo ./gpu-dvfs sweep
-```
-
-Sweeps 12 power levels from 15W down to 1W, measuring GPU GFLOPS at
-each. Shows the full performance-vs-power curve.
-
-### Live frequency monitor
-
-```bash
-sudo ./gpu-dvfs monitor     # Real-time powermetrics stream
 ```
 
 ### Options
