@@ -7,7 +7,7 @@ kernel extensions, SIP changes, or jailbreaking.
 Works on **M1, M2, M3, and M4** Macs.
 
 <p align="center">
-  <img src="screenshot.svg" width="720" alt="gpu-dvfs terminal demo showing status, cap/uncap cycle, and DVFS table on Apple M4">
+  <img src="screenshot.png" width="720" alt="gpu-dvfs terminal demo showing status, cap/uncap cycle, and DVFS table on Apple M4">
 </p>
 
 ## Requirements
