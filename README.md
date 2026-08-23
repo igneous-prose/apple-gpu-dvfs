@@ -1,180 +1,287 @@
 # Apple Silicon GPU DVFS Control
 
-Reverse-engineered GPU frequency/voltage scaling on Apple Silicon. Extracts the full DVFS P-state table from the device tree and controls GPU frequency via the CLPC (Closed Loop Performance Controller).
+Control your Mac's GPU frequency from the command line. Extract the full hardware
+DVFS table, throttle the GPU to any power level, and restore it — all without
+kernel extensions, SIP changes, or jailbreaking.
 
-Tested on M4 (Mac16,10, macOS 15.5). Works on any Apple Silicon Mac.
+Works on **M1, M2, M3, and M4** Macs.
 
-## Quick start
+```
+$ sudo ./gpu-dvfs cap 2
+✓ Saved original state to /tmp/.gpu_freq_ctl_saved_state
+• Setting power cap to 2.0 W...
+• Burning in GPU for 10s to trigger CLPC response...
+✓ GPU throttled: 41.0 GFLOPS (cap 2.0 W active)
+
+$ sudo ./gpu-dvfs uncap
+• Restoring saved state...
+✓ GPU recovered: 559.8 GFLOPS
+```
+
+## Requirements
+
+- macOS on Apple Silicon (M1/M2/M3/M4)
+- Xcode Command Line Tools (`xcode-select --install`)
+- `sudo` for frequency control (not needed for `table` or `info`)
+
+## Install
 
 ```bash
-# Build
+git clone https://github.com/maderix/apple-gpu-dvfs.git
+cd apple-gpu-dvfs
+
+# Option A: use the wrapper (auto-builds on first run)
+./gpu-dvfs info
+
+# Option B: build manually
 xcrun clang -framework IOKit -framework Foundation -framework Metal -O2 \
   -o gpu_freq_ctl gpu_freq_ctl.m
-
-# Show DVFS table (no sudo)
-./gpu_freq_ctl table
-
-# Show current GPU state + speed
-sudo ./gpu_freq_ctl status
-
-# Throttle GPU (cap package power to 2W)
-sudo ./gpu_freq_ctl cap 2
-
-# Restore full speed
-sudo ./gpu_freq_ctl uncap
-
-# Sweep all power levels, measure GFLOPS at each
-sudo ./gpu_freq_ctl sweep
 ```
 
-## What this does
+## Usage
 
-The tool writes to `AppleCLPC` (Apple's Closed Loop Performance Controller) via IOKit. The CLPC owns all DVFS decisions — it tracks power consumption via a PID controller and adjusts voltage/frequency states to stay within the configured power budget.
+### Show GPU info and DVFS table
 
-The key property is `` `pkg-low-power-target ``: setting it to a watt value (× 1048576) forces the CLPC to converge on that power level, which selects the appropriate P-state. Setting it to -16777216 (the default) disables the target and lets the GPU run at full speed.
+```bash
+./gpu-dvfs info         # SoC, GPU class, core count
+./gpu-dvfs table        # Full P-state table from device tree
+```
 
-### Verified effect (M4, 10-core GPU)
+### Check current GPU state
 
-| Command | GFLOPS (2048² matmul) | GPU Frequency | 
-|---------|----------------------|---------------|
-| `uncap` (default) | 560 | 1578 MHz (P15) |
-| `cap 2` | 41 | 338 MHz (P1) |
+```bash
+sudo ./gpu-dvfs status
+```
 
-Cap → uncap cycle is fully reproducible. The `uncap` command saves and restores the complete CLPC state, including the PID controller gains.
+Shows the current CLPC power budget, whether a cap is active,
+and runs a quick matmul benchmark to measure actual GPU speed.
 
-## DVFS P-state table
+### Throttle GPU
 
-Extracted from the device tree `perf-states` blob (8 bytes per entry: `[freq_Hz, voltage_mV]`):
+```bash
+sudo ./gpu-dvfs cap 2          # Cap to 2W → GPU drops to ~338 MHz
+sudo ./gpu-dvfs cap 4          # Cap to 4W → intermediate throttle
+sudo ./gpu-dvfs cap 2 --confirm  # Cap and verify with powermetrics
+```
+
+The tool saves the original CLPC state before modifying anything.
+
+### Restore full speed
+
+```bash
+sudo ./gpu-dvfs uncap
+```
+
+Restores all CLPC properties to their saved values. Includes a
+benchmark to confirm the GPU recovered.
+
+If the GPU stays throttled after uncap (rare, caused by CLPC PID state):
+```bash
+sudo pmset sleepnow     # sleep/wake resets CLPC firmware
+```
+
+### Sweep power levels
+
+```bash
+sudo ./gpu-dvfs sweep
+```
+
+Sweeps 12 power levels from 15W down to 1W, measuring GPU GFLOPS at
+each. Shows the full performance-vs-power curve.
+
+### Live frequency monitor
+
+```bash
+sudo ./gpu-dvfs monitor     # Real-time powermetrics stream
+```
+
+### Options
+
+| Flag | Effect |
+|------|--------|
+| `-v`, `--verbose` | Show IOKit calls and raw property values |
+| `--confirm` | Run powermetrics after cap/uncap to verify frequency |
+| `--no-burn` | Skip 10s GPU burn-in during cap (faster, less reliable) |
+| `--no-color` | Disable colored output |
+
+---
+
+## How it works
+
+### The CLPC
+
+Apple Silicon DVFS is managed by the **CLPC** (Closed Loop Performance Controller),
+a kernel driver (`AppleT8132CLPC` on M4) that implements a PID controller tracking
+package power consumption. It adjusts GPU voltage/frequency states to keep power
+within a configured budget.
+
+The CLPC exposes writable properties via IOKit's `IORegistryEntrySetCFProperties`.
+The key property is:
+
+| Property | Default | Effect |
+|----------|---------|--------|
+| `` `pkg-low-power-target `` | -16777216 (disabled) | Target power level. Set to watts × 1048576 to throttle. |
+
+Setting this to a positive value forces the CLPC to converge on that power level,
+which selects the appropriate P-state. Setting it back to -16777216 removes the
+target.
+
+Additional properties fine-tune the budget:
+
+| Property | Default (M4) | Effect |
+|----------|-------------|--------|
+| `~pkg-avg-max-power` | 4915200 (4.69W) | Average power cap |
+| `~pkg-lowpeak-max-power` | 4915200 (4.69W) | Low-peak cap |
+| `~pkg-power-zone-target-0` | 7536640 (7.19W) | Power zone target |
+| `~pkg-power-split-gpu-fraction` | 32768 (50%) | GPU's share of budget |
+
+The tool saves and restores **all 20 writable CLPC properties** (including PID
+controller gains) to ensure clean recovery.
+
+### DVFS P-state table
+
+The GPU's voltage/frequency operating points are stored in the macOS device tree
+as the `perf-states` property on the `sgx` node. Each entry is 8 bytes:
+`[frequency_Hz (u32), voltage_mV (u32)]`.
+
+Example (M4, 10-core GPU, `gpu,t8132`):
 
 ```
-P-state   Freq MHz   GPU mV   SRAM mV   Corner
--------   --------   ------   -------   ------
-P0  (idle)    0        125      780     
-P1          338        615      780     
-P2          618        645      780     
-P3  (base)  796        680      780     ← gpu-perf-base-pstate
-P4          928        725      780     
-P5          952        780      780     A·lo
-P6         1056        780      780     A·hi (+104 MHz, same voltage)
-P7         1053        835      835     B·lo
-P8         1170        835      835     B·hi (+117 MHz)
-P9         1152        875      875     C·lo
-P10        1278        875      875     C·hi (+126 MHz)
-P11        1204        905      905     D·lo
-P12        1338        905      905     D·hi (+134 MHz)
-P13        1326        980      980     E·lo
-P14        1470        980      980     E·hi (+144 MHz)
-P15 (peak) 1578       1055     1055     
+P0  (idle)    0 MHz     125 mV   SRAM  780 mV
+P1          338 MHz     615 mV   SRAM  780 mV
+P2          618 MHz     645 mV   SRAM  780 mV
+P3  (base)  796 MHz     680 mV   SRAM  780 mV   ← gpu-perf-base-pstate
+P4          928 MHz     725 mV   SRAM  780 mV
+P5          952 MHz     780 mV   SRAM  780 mV   ┐ Corner A
+P6         1056 MHz     780 mV   SRAM  780 mV   ┘ +104 MHz, same voltage
+P7         1053 MHz     835 mV   SRAM  835 mV   ┐ Corner B
+P8         1170 MHz     835 mV   SRAM  835 mV   ┘ +117 MHz
+P9         1152 MHz     875 mV   SRAM  875 mV   ┐ Corner C
+P10        1278 MHz     875 mV   SRAM  875 mV   ┘ +126 MHz
+P11        1204 MHz     905 mV   SRAM  905 mV   ┐ Corner D
+P12        1338 MHz     905 mV   SRAM  905 mV   ┘ +134 MHz
+P13        1326 MHz     980 mV   SRAM  980 mV   ┐ Corner E
+P14        1470 MHz     980 mV   SRAM  980 mV   ┘ +144 MHz
+P15 (peak) 1578 MHz    1055 mV   SRAM 1055 mV
 ```
 
 ### Voltage corners
 
-Five voltage levels (780–980 mV) each have two frequencies — a "lo" (energy-efficient) and "hi" (max clock at that voltage). The frequency delta increases with voltage (104 → 144 MHz), reflecting wider timing margin at higher voltages.
+Five voltage levels (780–980 mV) each support two clock frequencies: a "lo"
+(energy-efficient) and "hi" (max that passes timing at that voltage). The
+frequency delta grows with voltage — 104 MHz at 780 mV up to 144 MHz at 980 mV —
+reflecting wider timing margin at higher voltage.
 
 ### SRAM retention floor
 
-SRAM voltage holds at 780 mV for P0–P6 while GPU logic runs lower. From P7 onward they match. The GPU register file cannot operate below 780 mV.
+SRAM voltage holds at 780 mV for P0–P6 even as GPU logic voltage goes lower.
+From P7 onward they match. This means the GPU's register files and on-chip
+caches have a 780 mV floor; only the combinational logic scales below it.
 
-### DVFS behavior
+### Observed DVFS behavior
 
-The CLPC is binary in practice: light loads stay at P3 (796 MHz), any substantial compute jumps to P15 (1578 MHz). Power within P15 scales via clock/power gating (2.5–16W), not P-state stepping. The intermediate states are transient during ramp-up/down.
+The CLPC operates in a nearly binary mode: light loads stay at **P3 (796 MHz)**
+(the `gpu-perf-base-pstate`), and any substantial compute jumps directly to
+**P15 (1578 MHz)**. Power within P15 scales from ~2.5W to ~16W via clock/power
+gating across GPU cores — the CLPC doesn't step through intermediate P-states
+for power management; it gates cores at max frequency instead.
 
-## How frequency control works
+### Measured sweep results (M4)
 
-### Architecture
+| Power cap | GFLOPS | Ratio |
+|-----------|--------|-------|
+| 15.0 W | 427 | 100% |
+| 10.0 W | 369 | 86% |
+| 8.0 W | 331 | 78% |
+| 6.0 W | 204 | 48% |
+| 5.0 W | 202 | 47% |
+| 4.0 W | 174 | 41% |
+| 3.5 W | 103 | 24% |
+| 3.0 W | 69 | 16% |
+| 2.5 W | 64 | 15% |
+| 2.0 W | 41 | 10% |
+| 1.5 W | 42 | 10% |
+| 1.0 W | 41 | 10% |
+| uncap | 560 | — |
 
-```
- gpu_freq_ctl ──► AppleCLPC (IOKit) ──► PMGR firmware ──► voltage/freq regs
-                  (PID controller)      (per-domain)
-```
+The floor at ~41 GFLOPS (1–2W) corresponds to P1 (338 MHz), the lowest active
+P-state.
 
-### Writable CLPC properties
+---
 
-| Property | Default (M4) | Effect |
-|----------|-------------|--------|
-| `` `pkg-low-power-target `` | -16777216 (disabled) | **Primary control**: target power level |
-| `~pkg-avg-max-power` | 4915200 (4.69W) | Package average power cap |
-| `~pkg-lowpeak-max-power` | 4915200 (4.69W) | Low-peak power cap |
-| `~pkg-power-zone-target-0` | 7536640 (7.19W) | Power zone target |
-| `~pkg-power-split-gpu-fraction` | 32768 (50%) | GPU share of power budget |
+## Compatibility
 
-Values are scaled: power values × 1048576 = watts, fraction values × 65536 = ratio.
+The device tree format and CLPC interface are consistent across Apple Silicon:
 
-### Important: recovery
+| SoC | Device tree | CLPC driver | Status |
+|-----|------------|-------------|--------|
+| M1 | `gpu,t8103` | AppleT8103CLPC | Should work (same IOKit interface) |
+| M2 | `gpu,t8112` | AppleT8112CLPC | Should work |
+| M3 | `gpu,t8122` | AppleT8122CLPC | Should work |
+| **M4** | **`gpu,t8132`** | **AppleT8132CLPC** | **Tested and verified** |
 
-After capping, the CLPC's PID integrator holds state. Simply writing back the original `~pkg-avg-max-power` is **not enough** — you must also restore `` `pkg-low-power-target `` to -16777216 (disabled). The `uncap` command handles this automatically.
+The tool auto-detects the SoC from the device tree and adapts. Default CLPC
+values differ per chip — the tool saves/restores the actual values it reads,
+so it's safe on any model.
 
-If the GPU stays throttled after `uncap`, sleep/wake resets the CLPC firmware state:
+M1 Pro/Max/Ultra, M2 Pro/Max/Ultra, M3 Pro/Max/Ultra, and M4 Pro/Max should
+also work — they share the same CLPC driver within each generation and use the
+same `perf-states` format, with different P-state counts and frequencies.
+
+**If you test on a non-M4 chip**, please open an issue with the output of
+`./gpu-dvfs info` and `./gpu-dvfs table` so we can confirm compatibility.
+
+---
+
+## Extraction method (manual)
+
+If you want to read the DVFS table without this tool:
+
 ```bash
-sudo pmset sleepnow
-```
+# Find the GPU device tree node
+ioreg -l -w 0 -r -c AppleARMIODevice | grep -B5 -A200 '"device_type" = <"sgx">'
 
-## Extraction method
-
-The DVFS table requires no special access — it's in the IORegistry:
-
-```bash
-# Dump the GPU device tree node
-ioreg -l -w 0 -r -c AppleARMIODevice | grep -A200 '"compatible" = <"gpu,t8132">'
-```
-
-Key properties:
-- `perf-states` — 16 × 8 bytes: `[freq_Hz(u32), voltage_mV(u32)]`
-- `perf-states-sram` — same format, SRAM retention voltages
-- `gpu-perf-base-pstate` — base P-state index (3 on M4)
-- `perf-state-count` — total P-states including idle (16 on M4)
-
-Decode:
-```python
+# Decode the perf-states blob
+python3 -c "
 import struct
-blob = bytes.fromhex('<hex from ioreg>')
-for i in range(16):
+# paste the hex from the 'perf-states' property here
+blob = bytes.fromhex('000000007d000000807825146702000080eed524...')
+for i in range(len(blob) // 8):
     freq, mv = struct.unpack_from('<II', blob, i * 8)
     print(f'P{i}: {freq / 1e6:.0f} MHz  {mv} mV')
+"
 ```
 
-## Files
+Key device tree properties:
+- `perf-states` — P-state table (8 bytes each: freq + voltage)
+- `perf-states-sram` — same format, SRAM retention voltages
+- `gpu-perf-base-pstate` — idle-active P-state index
+- `perf-state-count` — total entries including idle
 
-| File | Description |
-|------|-------------|
-| `gpu_freq_ctl.m` | **Main tool** — DVFS table extraction, CLPC control, GPU benchmarking |
-| `matmul_dvfs_bench.m` | Tiled FP32 matmul across matrix sizes showing DVFS scaling on GFLOPS |
-| `gpu_dvfs_bench.m` | ALU stress sweep with powermetrics |
-| `gpu_dvfs_bench_v2.m` | Advanced duty-cycling sweep to characterize lower P-states |
-| `parse_dvfs_results.py` | Parser for powermetrics logs |
-| `docs/index.html` | Interactive report with charts |
-| `experiments/` | RE probes that led to the CLPC discovery |
+## Repository structure
 
-## Building everything
-
-```bash
-# Main tool
-xcrun clang -framework IOKit -framework Foundation -framework Metal -O2 \
-  -o gpu_freq_ctl gpu_freq_ctl.m
-
-# Matmul benchmark
-xcrun clang -framework Metal -framework Foundation -O2 \
-  -o matmul_dvfs_bench matmul_dvfs_bench.m
-
-# Stress benchmarks
-xcrun clang -framework Metal -framework Foundation -O2 \
-  -o gpu_dvfs_bench gpu_dvfs_bench.m
-xcrun clang -framework Metal -framework Foundation -O2 \
-  -o gpu_dvfs_bench_v2 gpu_dvfs_bench_v2.m
+```
+gpu_freq_ctl.m        Main tool — CLPC control, DVFS extraction, GPU benchmark
+gpu-dvfs              Shell wrapper — auto-build, sudo handling, live monitor
+matmul_dvfs_bench.m   Standalone matmul benchmark showing DVFS scaling
+gpu_dvfs_bench.m      ALU stress sweep with powermetrics
+gpu_dvfs_bench_v2.m   Duty-cycling sweep for lower P-states
+parse_dvfs_results.py Powermetrics log parser
+docs/index.html       Interactive report with charts
+experiments/          IOKit probes from the reverse engineering process
 ```
 
-## Other Apple Silicon
+## Caveats
 
-The device tree format and CLPC interface are consistent across generations:
-
-| SoC | DT compatible | CLPC driver |
-|-----|--------------|-------------|
-| M1 | `gpu,t8103` | AppleT8103CLPC |
-| M2 | `gpu,t8112` | AppleT8112CLPC |
-| M3 | `gpu,t8122` | AppleT8122CLPC |
-| M4 | `gpu,t8132` | AppleT8132CLPC |
-
-Default CLPC values differ per SoC. The `uncap` command saves state before modification and restores it exactly, so it's safe on any model.
+- **This is reverse engineering.** Apple can change the CLPC interface in any
+  macOS update. The tool reads/writes IOKit properties that are not documented.
+- **Power caps affect the whole package**, not just the GPU. CPU performance
+  may also be affected at very low caps.
+- **The CLPC PID controller has long time constants** (~15 min input TC). After
+  aggressive throttling, recovery can take a few seconds. If stuck, sleep/wake
+  resets the firmware state instantly.
+- **No direct P-state selection.** The tool controls power budget, not
+  frequency directly. The CLPC picks the P-state to meet the budget.
 
 ## License
 

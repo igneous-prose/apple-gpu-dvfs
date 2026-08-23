@@ -762,6 +762,21 @@
     </div>
   </div>
 
+  <!-- CLPC Power Sweep -->
+  <div class="section">
+    <div class="section-label">CLPC Power Cap Sweep — GFLOPS vs Power Budget</div>
+    <div class="chart-container">
+      <canvas id="sweep-chart" width="880" height="300"></canvas>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--accent)"></span> Measured GFLOPS (2048² matmul)</span>
+        <span><span class="swatch" style="background:var(--peak);opacity:0.4"></span> Uncapped baseline (560 GFLOPS)</span>
+      </div>
+    </div>
+    <div class="callout" style="margin-top: 0.75rem;">
+      <strong>CLPC frequency control:</strong> GPU frequency is controlled via the <code>AppleCLPC</code> IOKit service. Setting <code>`pkg-low-power-target</code> to a watt value (× 1048576) forces the CLPC to converge on that power level. Default <code>-16777216</code> = disabled = full speed. The tool (<code>gpu_freq_ctl</code>) saves/restores all 20 writable CLPC properties for safe cap/uncap cycles.
+    </div>
+  </div>
+
   <!-- Extraction Method -->
   <div class="section">
     <div class="section-label">Extraction Method</div>
@@ -1227,6 +1242,112 @@
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
   ctx.fillText('GFLOPS (FP32)', 0, 0);
+  ctx.restore();
+})();
+
+// ---- CLPC sweep chart ----
+(function() {
+  const canvas = document.getElementById('sweep-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 880 * dpr;
+  canvas.height = 300 * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = 880, H = 300;
+  const pad = { top: 20, right: 30, bottom: 45, left: 60 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  const data = [
+    {cap:1.0, gf:41}, {cap:1.5, gf:42}, {cap:2.0, gf:41},
+    {cap:2.5, gf:64}, {cap:3.0, gf:69}, {cap:3.5, gf:103},
+    {cap:4.0, gf:174}, {cap:5.0, gf:202}, {cap:6.0, gf:204},
+    {cap:8.0, gf:331}, {cap:10.0, gf:369}, {cap:15.0, gf:427},
+  ];
+
+  const maxCap = 16, maxGF = 600;
+  const xOf = c => pad.left + (c / maxCap) * pw;
+  const yOf = g => pad.top + ph - (g / maxGF) * ph;
+
+  // Grid
+  ctx.strokeStyle = '#1e222e';
+  ctx.lineWidth = 1;
+  for (let g = 100; g <= 500; g += 100) {
+    ctx.beginPath(); ctx.moveTo(pad.left, yOf(g));
+    ctx.lineTo(W - pad.right, yOf(g)); ctx.stroke();
+  }
+
+  // Uncapped baseline
+  ctx.strokeStyle = 'rgba(212, 93, 93, 0.25)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath(); ctx.moveTo(pad.left, yOf(560));
+  ctx.lineTo(W - pad.right, yOf(560)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = '9px "IBM Plex Mono"';
+  ctx.fillStyle = '#d45d5d';
+  ctx.globalAlpha = 0.5;
+  ctx.textAlign = 'right';
+  ctx.fillText('uncapped: 560 GFLOPS', W - pad.right - 4, yOf(560) - 6);
+  ctx.globalAlpha = 1;
+
+  // Area
+  ctx.fillStyle = 'rgba(79, 168, 224, 0.08)';
+  ctx.beginPath();
+  ctx.moveTo(xOf(data[0].cap), yOf(0));
+  data.forEach(d => ctx.lineTo(xOf(d.cap), yOf(d.gf)));
+  ctx.lineTo(xOf(data[data.length-1].cap), yOf(0));
+  ctx.closePath(); ctx.fill();
+
+  // Line
+  ctx.strokeStyle = '#4fa8e0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    i === 0 ? ctx.moveTo(xOf(d.cap), yOf(d.gf)) : ctx.lineTo(xOf(d.cap), yOf(d.gf));
+  });
+  ctx.stroke();
+
+  // Points
+  data.forEach(d => {
+    ctx.fillStyle = d.gf < 50 ? '#d45d5d' : d.gf > 400 ? '#5b9e5b' : '#4fa8e0';
+    ctx.beginPath();
+    ctx.arc(xOf(d.cap), yOf(d.gf), 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0c0e12';
+    ctx.beginPath();
+    ctx.arc(xOf(d.cap), yOf(d.gf), 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Labels on key points
+  ctx.font = '9px "IBM Plex Mono"';
+  ctx.fillStyle = '#7a8194';
+  ctx.textAlign = 'center';
+  ctx.fillText('41', xOf(2), yOf(41) + 16);
+  ctx.fillText('174', xOf(4), yOf(174) - 10);
+  ctx.fillText('427', xOf(15), yOf(427) - 10);
+
+  // Axes
+  ctx.font = '10px "IBM Plex Mono"';
+  ctx.fillStyle = '#4e5568';
+  ctx.textAlign = 'center';
+  for (let c = 2; c <= 15; c += 2) {
+    ctx.fillText(c + 'W', xOf(c), H - pad.bottom + 16);
+  }
+  ctx.fillText('Power cap (W)', W / 2, H - 4);
+
+  ctx.textAlign = 'right';
+  for (let g = 0; g <= 500; g += 100) {
+    ctx.fillText(g + '', pad.left - 8, yOf(g) + 4);
+  }
+  ctx.save();
+  ctx.translate(14, H / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('GFLOPS', 0, 0);
   ctx.restore();
 })();
 </script>

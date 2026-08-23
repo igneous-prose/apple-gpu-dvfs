@@ -1,0 +1,135 @@
+#!/bin/bash
+# gpu-dvfs — wrapper for gpu_freq_ctl (Apple Silicon GPU DVFS control)
+#
+# Handles build, provides nice subcommands, wraps powermetrics.
+# Run without arguments for help.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BINARY="$SCRIPT_DIR/gpu_freq_ctl"
+SOURCE="$SCRIPT_DIR/gpu_freq_ctl.m"
+
+# Colors
+if [ -t 1 ]; then
+    RED='\033[31m'; GREEN='\033[32m'; YELLOW='\033[33m'
+    BLUE='\033[34m'; CYAN='\033[36m'; BOLD='\033[1m'
+    DIM='\033[2m'; RESET='\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; BOLD=''; DIM=''; RESET=''
+fi
+
+log_info()  { echo -e "${CYAN}•${RESET} $*"; }
+log_ok()    { echo -e "${GREEN}✓${RESET} $*"; }
+log_warn()  { echo -e "${YELLOW}⚠${RESET} $*"; }
+log_err()   { echo -e "${RED}✗${RESET} $*" >&2; }
+
+# ─── Requirements check ─────────────────────────────────────────────────────
+
+check_requirements() {
+    if [[ "$(uname)" != "Darwin" ]]; then
+        log_err "This tool requires macOS with Apple Silicon"
+        exit 1
+    fi
+
+    if ! sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi "apple"; then
+        log_err "Apple Silicon required (detected: $(sysctl -n machdep.cpu.brand_string 2>/dev/null))"
+        exit 1
+    fi
+
+    if ! command -v xcrun &>/dev/null; then
+        log_err "Xcode Command Line Tools required"
+        echo "  Install with: xcode-select --install"
+        exit 1
+    fi
+}
+
+# ─── Build ───────────────────────────────────────────────────────────────────
+
+build_if_needed() {
+    if [ ! -f "$BINARY" ] || [ "$SOURCE" -nt "$BINARY" ]; then
+        log_info "Building gpu_freq_ctl..."
+        xcrun clang -framework IOKit -framework Foundation -framework Metal -O2 \
+            -o "$BINARY" "$SOURCE"
+        log_ok "Built: $BINARY"
+    fi
+}
+
+# ─── Commands ────────────────────────────────────────────────────────────────
+
+cmd_help() {
+    echo -e "${BOLD}gpu-dvfs${RESET} — Apple Silicon GPU frequency control"
+    echo ""
+    echo -e "  ${CYAN}gpu-dvfs status${RESET}           Show GPU state, CLPC config, measured speed"
+    echo -e "  ${CYAN}gpu-dvfs cap${RESET} <watts>      Throttle GPU (e.g. 'cap 2' for 2W limit)"
+    echo -e "  ${CYAN}gpu-dvfs uncap${RESET}            Restore original GPU speed"
+    echo -e "  ${CYAN}gpu-dvfs sweep${RESET}            Sweep power levels, show GFLOPS at each"
+    echo -e "  ${CYAN}gpu-dvfs table${RESET}            Print hardware DVFS P-state table"
+    echo -e "  ${CYAN}gpu-dvfs info${RESET}             Detect SoC and GPU configuration"
+    echo -e "  ${CYAN}gpu-dvfs monitor${RESET}          Live GPU frequency + power (powermetrics)"
+    echo -e "  ${CYAN}gpu-dvfs build${RESET}            Force rebuild the binary"
+    echo ""
+    echo "Flags (pass after the command):"
+    echo "  -v, --verbose     Show internal IOKit operations"
+    echo "  --confirm         Verify frequency change via powermetrics"
+    echo "  --no-burn         Skip burn-in during cap (faster)"
+    echo ""
+    echo -e "${DIM}Requires macOS + Apple Silicon (M1/M2/M3/M4).${RESET}"
+    echo -e "${DIM}Commands that modify DVFS need sudo.${RESET}"
+}
+
+cmd_monitor() {
+    if [ "$(id -u)" -ne 0 ]; then
+        log_err "monitor requires sudo"
+        echo "  Run: sudo gpu-dvfs monitor"
+        exit 1
+    fi
+    log_info "Live GPU frequency + power (Ctrl-C to stop)"
+    echo ""
+    exec powermetrics --samplers gpu_power -i 500
+}
+
+cmd_build() {
+    log_info "Force rebuilding..."
+    rm -f "$BINARY"
+    build_if_needed
+}
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
+check_requirements
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+    help|--help|-h)
+        cmd_help
+        ;;
+    build)
+        cmd_build
+        ;;
+    monitor)
+        cmd_monitor
+        ;;
+    status|cap|uncap|sweep|table|info)
+        build_if_needed
+        # table and info don't need sudo
+        if [[ "$CMD" == "table" || "$CMD" == "info" ]]; then
+            "$BINARY" "$CMD" "$@"
+        else
+            if [ "$(id -u)" -ne 0 ]; then
+                log_warn "This command needs sudo — re-running with sudo..."
+                exec sudo "$BINARY" "$CMD" "$@"
+            else
+                "$BINARY" "$CMD" "$@"
+            fi
+        fi
+        ;;
+    *)
+        log_err "Unknown command: $CMD"
+        echo ""
+        cmd_help
+        exit 1
+        ;;
+esac
