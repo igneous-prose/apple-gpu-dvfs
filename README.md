@@ -155,16 +155,21 @@ P15 (peak) 1578 MHz    1055 mV   SRAM 1055 mV
 
 ### Measured sweep results
 
-**M4 (AGX path, SetMaxGPUAbsolutePower):**
+**M4 (AGX path, SetMaxGPUAbsolutePower, 10s burn-in per level):**
 
 | Cap | GFLOPS | Filtered Power |
 |-----|--------|----------------|
-| 20W (default) | 476 | 7911 mW |
-| 15W | 450 | 8272 mW |
-| 10W | 405 | 7436 mW |
-| 5W | 355 | 6012 mW |
-| 2W | 278 | 2839 mW |
-| Restored | **554** | — |
+| 20W (default) | 367 | 7368 mW |
+| 10W | 396 | 7867 mW |
+| 5W | 315 | 5004 mW |
+| 3W | 224 | 3004 mW |
+| 2W | 158 | 1999 mW |
+| 1W | 84 | 1001 mW |
+| 500mW | 41 | 508 mW |
+| Restored | **560** | — |
+
+The AGX firmware needs ~10s of sustained GPU load to converge on low caps.
+`FilteredGPUPower` tracks the cap precisely (±5 mW). Recovery is instant.
 
 **M5 Max 128GB** (community-verified by @Beamsters1):
 
