@@ -191,16 +191,22 @@ P-state.
 
 The device tree format and CLPC interface are consistent across Apple Silicon:
 
-| SoC | Device tree | CLPC driver | Status |
-|-----|------------|-------------|--------|
-| M1 | `gpu,t8103` | AppleT8103CLPC | Should work (same IOKit interface) |
-| M2 | `gpu,t8112` | AppleT8112CLPC | Should work |
-| M3 | `gpu,t8122` | AppleT8122CLPC | Should work |
-| **M4** | **`gpu,t8132`** | **AppleT8132CLPC** | **Tested and verified** |
+| SoC | Device tree | CLPC driver | CLPC write | `pmset` fallback | Status |
+|-----|------------|-------------|------------|------------------|--------|
+| M1 | `gpu,t8103` | AppleT8103CLPC | Should work | Yes | Untested |
+| M2 | `gpu,t8112` | AppleT8112CLPC | Should work | Yes | Untested |
+| M3 | `gpu,t8122` | AppleT8122CLPC | Should work | Yes | Untested |
+| **M4** | **`gpu,t8132`** | **AppleT8132CLPC** | **Yes** | **Yes** | **Verified** |
+| M5 | `gpu,t8140`? | AppleT8140CLPC? | Unknown | Yes | Untested |
 
 The tool auto-detects the SoC from the device tree and adapts. Default CLPC
 values differ per chip — the tool saves/restores the actual values it reads,
 so it's safe on any model.
+
+**M5 note**: CLPC fine-grained control (property writes) is unverified on M5.
+If it doesn't work, `sudo pmset -a lowpowermode 1` provides binary GPU throttle
+(~50% reduction on M4) as a fallback — this is a public macOS API that works
+across all Apple Silicon generations.
 
 M1 Pro/Max/Ultra, M2 Pro/Max/Ultra, M3 Pro/Max/Ultra, and M4 Pro/Max should
 also work — they share the same CLPC driver within each generation and use the
@@ -239,14 +245,31 @@ Key device tree properties:
 ## Repository structure
 
 ```
-gpu_freq_ctl.m        Main tool — CLPC control, DVFS extraction, GPU benchmark
-gpu-dvfs              Shell wrapper — auto-build, sudo handling, live monitor
-matmul_dvfs_bench.m   Standalone matmul benchmark showing DVFS scaling
-gpu_dvfs_bench.m      ALU stress sweep with powermetrics
-gpu_dvfs_bench_v2.m   Duty-cycling sweep for lower P-states
-parse_dvfs_results.py Powermetrics log parser
-docs/index.html       Interactive report with charts
-experiments/          IOKit probes from the reverse engineering process
+gpu_freq_ctl.m          Main tool — CLPC control, DVFS extraction, GPU benchmark
+gpu-dvfs                Shell wrapper — auto-build, sudo handling, named presets
+matmul_dvfs_bench.m     Tiled FP32 matmul — DVFS scaling demo (~560 GFLOPS peak)
+matmul_mma_bench.m      Simdgroup MMA matmul — near-peak throughput (~3.4 TFLOPS)
+gpu_dvfs_bench.m        ALU stress sweep with powermetrics
+gpu_dvfs_bench_v2.m     Duty-cycling sweep for lower P-states
+parse_dvfs_results.py   Powermetrics log parser
+docs/index.html         Interactive report with charts
+experiments/            IOKit probes from the reverse engineering process
+```
+
+### Benchmark notes
+
+Two matmul benchmarks are included for different purposes:
+
+- **`matmul_dvfs_bench.m`** — naive 16×16 tiled kernel (~560 GFLOPS). Designed to
+  show DVFS scaling (1.8 → 560 GFLOPS across matrix sizes), not to hit peak.
+- **`matmul_mma_bench.m`** — uses `simdgroup_matrix_multiply_accumulate` for
+  near-peak ALU utilization. Hits **3.4 TFLOPS** (74% of M4's ~4.6 TFLOPS FP32
+  theoretical peak). The remaining gap is from global memory loads without shared
+  memory tiling.
+
+Build both with:
+```bash
+xcrun clang -framework Metal -framework Foundation -O2 -o matmul_mma_bench matmul_mma_bench.m
 ```
 
 ## Caveats
