@@ -53,20 +53,19 @@ build_if_needed() {
     fi
 }
 
-# ─── Preset mapping ────────────────────────────────────────────────────────
+# ─── Preset mapping (watts) ────────────────────────────────────────────────
 
 resolve_preset() {
     local input="$1"
     case "$input" in
         min|minimum|lowest)   echo "1"   ;;
         low)                  echo "2"   ;;
-        medium-low|medlow)    echo "3"   ;;
-        medium|med)           echo "5"   ;;
-        medium-high|medhigh)  echo "8"   ;;
-        high)                 echo "10"  ;;
+        medium-low|medlow)    echo "5"   ;;
+        medium|med)           echo "10"  ;;
+        medium-high|medhigh)  echo "15"  ;;
+        high)                 echo "15"  ;;
         max|full|uncap)       echo "uncap" ;;
         *)
-            # Check if it's a number (watts)
             if [[ "$input" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                 echo "$input"
             else
@@ -83,21 +82,23 @@ cmd_help() {
     echo ""
     echo -e "${BOLD}Quick start:${RESET}"
     echo -e "  ${CYAN}gpu-dvfs status${RESET}              Show GPU state + speed"
-    echo -e "  ${CYAN}gpu-dvfs set low${RESET}             Throttle GPU to low power"
+    echo -e "  ${CYAN}gpu-dvfs set low${RESET}             Throttle GPU (2W cap)"
     echo -e "  ${CYAN}gpu-dvfs set max${RESET}             Restore full speed"
     echo ""
     echo -e "${BOLD}Named power levels:${RESET}"
-    echo -e "  ${CYAN}min${RESET}     1W   ~338 MHz    P1         (${DIM}~41 GFLOPS${RESET})"
-    echo -e "  ${CYAN}low${RESET}     2W   ~338 MHz    P1         (${DIM}~41 GFLOPS${RESET})"
-    echo -e "  ${CYAN}medium${RESET}  5W   ~950 MHz    P5-P6      (${DIM}~200 GFLOPS${RESET})"
-    echo -e "  ${CYAN}high${RESET}   10W   ~1300 MHz   P12-P14    (${DIM}~370 GFLOPS${RESET})"
-    echo -e "  ${CYAN}max${RESET}     —    ~1578 MHz   P15        (${DIM}~560 GFLOPS${RESET})"
+    echo -e "  ${CYAN}min${RESET}      1W       GPU floor frequency"
+    echo -e "  ${CYAN}low${RESET}      2W       Low power"
+    echo -e "  ${CYAN}medium${RESET}  10W       Balanced"
+    echo -e "  ${CYAN}high${RESET}    15W       High performance"
+    echo -e "  ${CYAN}max${RESET}      —        Uncapped (full speed)"
+    echo ""
+    echo -e "  Or set any watt value directly: ${CYAN}gpu-dvfs set 7.5${RESET}"
     echo ""
     echo -e "${BOLD}All commands:${RESET}"
     echo -e "  ${CYAN}gpu-dvfs set${RESET} <level|watts>  Set GPU power (name or watts)"
-    echo -e "  ${CYAN}gpu-dvfs status${RESET}              CLPC config + measured speed"
-    echo -e "  ${CYAN}gpu-dvfs cap${RESET} <watts>         Raw power cap (watts)"
-    echo -e "  ${CYAN}gpu-dvfs uncap${RESET}               Restore original speed"
+    echo -e "  ${CYAN}gpu-dvfs status${RESET}              Current state + measured speed"
+    echo -e "  ${CYAN}gpu-dvfs cap${RESET} <watts>         Raw power cap"
+    echo -e "  ${CYAN}gpu-dvfs uncap${RESET}               Restore saved power cap"
     echo -e "  ${CYAN}gpu-dvfs sweep${RESET}               Sweep all levels, measure GFLOPS"
     echo -e "  ${CYAN}gpu-dvfs table${RESET}               Hardware DVFS P-state table"
     echo -e "  ${CYAN}gpu-dvfs info${RESET}                Detect SoC + GPU configuration"
@@ -107,10 +108,12 @@ cmd_help() {
     echo -e "${BOLD}Flags:${RESET} (pass after the command)"
     echo "  -v, --verbose     Show IOKit calls and raw values"
     echo "  --confirm         Verify frequency via powermetrics"
-    echo "  --no-burn         Skip 10s burn-in (faster, less reliable)"
+    echo "  --no-burn         Skip warm-up (faster)"
+    echo "  --clpc            Force CLPC fallback (system-wide, has PID lag)"
     echo "  --no-color        Disable colored output"
     echo ""
-    echo -e "${DIM}Requires macOS + Apple Silicon (M1/M2/M3/M4). sudo for power control.${RESET}"
+    echo -e "${DIM}Uses AGX SetMaxGPUAbsolutePower (GPU-only, instant, M1–M5).${RESET}"
+    echo -e "${DIM}Falls back to CLPC if AGX path unavailable. sudo for power control.${RESET}"
 }
 
 cmd_set() {
@@ -134,7 +137,7 @@ cmd_set() {
     fi
 
     if [ "$resolved" = "uncap" ]; then
-        log_info "Setting GPU to ${BOLD}max${RESET} (uncapped)"
+        log_info "Setting GPU to ${BOLD}max${RESET} (removing power cap)"
         run_sudo uncap "$@"
     else
         log_info "Setting GPU to ${BOLD}${level}${RESET} (${resolved}W cap)"

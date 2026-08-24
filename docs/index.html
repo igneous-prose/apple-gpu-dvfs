@@ -762,18 +762,18 @@
     </div>
   </div>
 
-  <!-- CLPC Power Sweep -->
+  <!-- AGX Power Cap -->
   <div class="section">
-    <div class="section-label">CLPC Power Cap Sweep — GFLOPS vs Power Budget</div>
+    <div class="section-label">AGX Power Cap — SetMaxGPUAbsolutePower (Primary Method)</div>
     <div class="chart-container">
       <canvas id="sweep-chart" width="880" height="300"></canvas>
       <div class="chart-legend">
         <span><span class="swatch" style="background:var(--accent)"></span> Measured GFLOPS (2048² matmul)</span>
-        <span><span class="swatch" style="background:var(--peak);opacity:0.4"></span> Uncapped baseline (560 GFLOPS)</span>
+        <span><span class="swatch" style="background:var(--peak);opacity:0.4"></span> Uncapped baseline (554 GFLOPS)</span>
       </div>
     </div>
     <div class="callout" style="margin-top: 0.75rem;">
-      <strong>CLPC frequency control:</strong> GPU frequency is controlled via the <code>AppleCLPC</code> IOKit service. Setting <code>`pkg-low-power-target</code> to a watt value (× 1048576) forces the CLPC to converge on that power level. Default <code>-16777216</code> = disabled = full speed. The tool (<code>gpu_freq_ctl</code>) saves/restores all 20 writable CLPC properties for safe cap/uncap cycles.
+      <strong>AGX direct power cap (M1–M5):</strong> The AGX GPU driver exposes <code>SetMaxGPUAbsolutePower</code> — a writable power cap in milliwatts, directly on the GPU service. GPU-only (no CPU impact), instant recovery, no PID integrator issues. Read <code>FilteredGPUPower</code> for real-time power draw. Falls back to CLPC <code>pkg-low-power-target</code> if AGX path unavailable.
     </div>
   </div>
 
