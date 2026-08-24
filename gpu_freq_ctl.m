@@ -507,10 +507,16 @@ static void cmd_cap(double watts) {
         }
 
         if (!g_no_burn) {
-            LOG_INFO("Warming GPU for 3s...");
+            LOG_INFO("Burning in GPU for 10s (AGX firmware needs sustained load to converge)...");
             fflush(stdout);
-            measure_gflops(); measure_gflops();
-            sleep(1);
+            mach_timebase_info_data_t tbi;
+            mach_timebase_info(&tbi);
+            uint64_t t0 = mach_absolute_time();
+            while (1) {
+                uint64_t ns = (mach_absolute_time() - t0) * tbi.numer / tbi.denom;
+                if (ns > 10000000000ULL) break;
+                measure_gflops();
+            }
         }
 
         double gf = measure_gflops();
